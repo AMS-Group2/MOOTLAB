@@ -79,7 +79,7 @@ params.sizeTolerance = 50;
 params.positionFlag = 0;
 params.sizeFlag = 0;
 params.width = size(rgbImg,2); 
-load ('classifier.mat');
+load ('classifier_RT.mat');
 params.classifier = classifier;
 
  for i = 1:10000
@@ -89,7 +89,7 @@ params.classifier = classifier;
     rgbImg = readImage(imgMsg);
     figure(111),imshow(rgbImg)
     
-    [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, robot, velmsg, odom);
+    [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, robot, velmsg, odom, scansub);
 
     % Send velocity commands and wait for commands to send.
     velmsg.Linear.X = lin_vel; 
@@ -107,13 +107,14 @@ end
 lin_vel = 0;
 ang_vel = 0; 
 velmsg.Linear.X = lin_vel; 
+
 velmsg.Angular.Z = ang_vel; 
 send(robot,velmsg);
         
 rosshutdown
 
 plot_trajectory(odomList, waypoints)
-
+%% Functions
 function plot_pointcloud(scanMsg)
 lidarData = lidarScan(scanMsg);
 
@@ -176,8 +177,6 @@ if abs(ang_vel) > 0.2
 end
 %///
 end
-
-%%
 function plot_trajectory(robot_poses, waypoints)
 
 max_ind = max(find(robot_poses(4,:)));
@@ -209,7 +208,7 @@ plot(robot_poses(4,1:max_ind)-robot_poses(4,1),180/pi*robot_poses(3,1:max_ind))
 xlabel('Time (sec)')
 ylabel('Angle (deg)')
 end
-%% obstacle avoid function
+% obstacle avoid function
 function obst_avoid(odom, scansub,velmsg,robot,xEnd,yEnd)
 while true
 MaxRange = 1; % max scan range of waffle pi is 3.5m
@@ -276,6 +275,10 @@ odomList = zeros(4,100000); % matrix to collect odom readings
                 odomList(:,odomcount) = [x; y; phi; t];
                 odomcount = odomcount + 1;
             end
+            lin_vel=0.05;
+            velmsg.Linear.X = lin_vel;
+            send(robot,velmsg);
+            pause(0.5);
             fprintf('end turn right')
             [minrangeF, minIndexF] = min(fwdranges);
             plot_pointcloud(scanMsg);
@@ -302,7 +305,10 @@ odomList = zeros(4,100000); % matrix to collect odom readings
                 odomList(:,odomcount) = [x; y; phi; t];
                 odomcount = odomcount + 1;
             end
-            
+            lin_vel=0.05;
+            velmsg.Linear.X = lin_vel;
+            send(robot,velmsg);
+            pause(0.5);
             fprintf('end turn left')
             [minrangeF, minIndexF] = min(fwdranges);
             plot_pointcloud(scanMsg);
@@ -334,9 +340,8 @@ odomList = zeros(4,100000); % matrix to collect odom readings
 end
 %top for loop (waypoints)
 end
-
-%% Track
-function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, robot, velmsg, odom)
+% Track
+function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, robot, velmsg, odom, scansub)
     [position,ballSize,boundingBox] = findColorBall(rgbImg);
     
     % Initialize velocities to zero.
@@ -350,6 +355,8 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
     if isempty(position)
         ang_vel = 0.0;
         lin_vel = 0;
+           
+ 
     elseif (position(1) < (params.width/2)-params.horizontalTolerance)
         ang_vel = 0.3;
     elseif (position(1) > (params.width/2)+params.horizontalTolerance)
@@ -374,22 +381,22 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
         % run image classifier
         w = boundingBox(3);
         h = boundingBox(4);
-        boundingBox = [boundingBox(1)+(w*0.2), boundingBox(2)+w*0.2, w*0.6, h*0.6]; 
+        boundingBox = [boundingBox(1)+(w*0.2), boundingBox(2)+w*0.2, w*0.6, h*0.6];
         croppedCircle = imcrop(rgbImg, boundingBox);
         % figure, imshow(croppedCircle)
         bwcroppedCircle = rgb2gray(croppedCircle);
         bwcroppedCircle = imbinarize(bwcroppedCircle,0.1);
         figure(100), imshow(bwcroppedCircle)
-
-        predictedLabels = predictNumber(bwcroppedCircle,params.classifier) 
+        
+        predictedLabels = predictNumber(bwcroppedCircle,params.classifier)
         predicted_numb = string(predictedLabels);
         predicted_numb = double(predicted_numb);
-%         predicted_numb = int(predicted_numb);
+        %         predicted_numb = int(predicted_numb);
         ang_vel = 0.0;
         lin_vel = 0.0;
         velmsg.Linear.X = lin_vel;
         velmsg.Angular.Z = ang_vel;
-         send(robot,velmsg);
+        send(robot,velmsg);
         odomdata = receive(odom,3);
         
         if predicted_numb == 1
@@ -401,14 +408,14 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
             
             fprintf('yeet')
             
-            filepath = 'map_orig.jpg'; % Provide the path of map image file
+            filepath = 'new_map.jpg'; % Provide the path of map image file
             image = imread(filepath);
             figure(1),imshow(image)
             
             % Convert to grayscale and then black and white image based on arbitrary
             % threshold.
             grayimage = rgb2gray(image);
-            bwimage = grayimage < 0.5;
+            bwimage = grayimage < 0.4;
             
             % Use black and white image as matrix input for binary occupancy grid.
             % Resolution was selected to be 136 by trial and error, specified in cells per meter.
@@ -474,12 +481,13 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
             
             fprintf('yeet')
             
-            filepath = 'map_orig.jpg'; % Provide the path of map image file
+            filepath = 'new_map.jpg'; % Provide the path of map image file
             image = imread(filepath);
             figure(1),imshow(image)
             
             % Convert to grayscale and then black and white image based on arbitrary
-            % threshold.
+            % threshold.Invalid or deleted object.
+            
             grayimage = rgb2gray(image);
             bwimage = grayimage < 0.5;
             
@@ -493,7 +501,7 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
             inflate(mapInflated,0.18); %robot radius is 0.22m
             figure(3),show(mapInflated)
             start_location = [x, y];
-            end_location = [1.5, 2.5];
+            end_location = [0.75, 1.25];
             %  call path plan function
             [path] = FindLocalPath(mapInflated, start_location, end_location);
             init_lin_vel = lin_vel;
@@ -519,7 +527,23 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
                     odomdata = receive(odom,3);
                     
                     [x,y,phi,t] = GetPose(odomdata);% returns x,y,phi,t
+                    while (x > 2.5) && (y<1.5)
+                        fprintf('in second Obst_avoid')
+                        obst_avoid(odom,scansub,velmsg,robot,xEnd,yEnd)
+                        odomdata = receive(odom,3);
+                        [x,y,phi,t] = GetPose(odomdata);
+                        waypoint_reached=true;
+                        break
+                    end
                     
+                    while(x > 2) && (y<1)
+                        fprintf('In first obst_avoid')
+                        obst_avoid(odom,scansub,velmsg,robot,xEnd,yEnd)
+                        odomdata = receive(odom,3);
+                        [x,y,phi,t] = GetPose(odomdata);
+                        waypoint_reached=true;
+                        break
+                    end
                     [lin_vel,ang_vel] = P_Controller(x,y,phi,xEnd,yEnd,init_lin_vel,max_ang_vel); % returns ang_vel
                     
                     velmsg.Angular.Z = ang_vel;
@@ -532,11 +556,27 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
                     if abs(distance)<0.15
                         break
                     end
-                    %
+                    %while (x > 2.5) && (y<1.5)
+                    fprintf('in second Obst_avoid')
+                    obst_avoid(odom,scansub,velmsg,robot,xEnd,yEnd)
+                    odomdata = receive(odom,3);
+                    [x,y,phi,t] = GetPose(odomdata);
+                    waypoint_reached=true;
+                    break
+                end
+                
+                while(x > 2) && (y<1)
+                    fprintf('In first obst_avoid')
+                    obst_avoid(odom,scansub,velmsg,robot,xEnd,yEnd)
+                    odomdata = receive(odom,3);
+                    [x,y,phi,t] = GetPose(odomdata);
+                    waypoint_reached=true;
+                    break
                 end
             end
-            
         end
+        
+        
         
         if predicted_numb == 3
             lin_vel = 0.0;
@@ -547,7 +587,7 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
             
             fprintf('yeet')
             
-            filepath = 'map_orig.jpg'; % Provide the path of map image file
+            filepath = 'new_map.jpg'; % Provide the path of map image file
             image = imread(filepath);
             figure(1),imshow(image)
             
@@ -566,7 +606,7 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
             inflate(mapInflated,0.18); %robot radius is 0.22m
             figure(3),show(mapInflated)
             start_location = [x, y];
-            end_location = [2.5, 3.5];
+            end_location = [1.25, 1.75];
             %  call path plan function
             [path] = FindLocalPath(mapInflated, start_location, end_location);
             init_lin_vel = lin_vel;
@@ -618,9 +658,9 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
             send(robot,velmsg);
             odomdata = receive(odom,3);
             
-            fprintf('yeet')
+            fprintf('yeet-4')
             
-            filepath = 'map_orig.jpg'; % Provide the path of map image file
+            filepath = 'new_map.jpg'; % Provide the path of map image file
             image = imread(filepath);
             figure(1),imshow(image)
             
@@ -639,7 +679,7 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
             inflate(mapInflated,0.18); %robot radius is 0.22m
             figure(3),show(mapInflated)
             start_location = [x, y];
-            end_location = [3.5, 2.5];
+            end_location = [1.75, 1.25];
             %  call path plan function
             [path] = FindLocalPath(mapInflated, start_location, end_location);
             init_lin_vel = lin_vel;
@@ -648,24 +688,26 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
             lin_vel = -0.5;
             velmsg.Linear.X = lin_vel;
             send(robot,velmsg);
-            fprintf('pause\n')
+            fprintf('pause-4\n')
             pause(1)
             
             for i=2:size(path,2)
                 xEnd = path(1,i);
                 yEnd = path(2,i);
-                
-                
-                
-                while true
+                fprintf('for-4')
+                waypoint_reached = false;
+                while waypoint_reached == false
+                    fprintf('while-4')
+                    
                     lin_vel = 0.15;
                     velmsg.Linear.X = lin_vel;
-                    
+                    scanMsg = receive(scansub, 10);
+                    lidarData = lidarScan(scanMsg);
                     send(robot,velmsg);
                     odomdata = receive(odom,3);
                     
                     [x,y,phi,t] = GetPose(odomdata);% returns x,y,phi,t
-                    
+                  
                     [lin_vel,ang_vel] = P_Controller(x,y,phi,xEnd,yEnd,init_lin_vel,max_ang_vel); % returns ang_vel
                     
                     velmsg.Angular.Z = ang_vel;
@@ -679,12 +721,15 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
                         break
                     end
                     %
+                    
                 end
             end
             
         end
         
         lin_vel = 0.0;
+        ang_vel = 0.0;
+        velmsg.Angular.Z = ang_vel;
         velmsg.Linear.X = lin_vel;
         send(robot,velmsg);
         fprintf('pause\n')
@@ -696,7 +741,7 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
         
         start_location = [x, y];
         end_location = [0.5, 0.5];
-        path = []
+        path = [];
         [path] = FindLocalPath(mapInflated,start_location, end_location);
         
         init_lin_vel = lin_vel;
@@ -729,19 +774,26 @@ function [predictedLabels,lin_vel,ang_vel]  = trackCircle(rgbImg, params, x, y, 
                 if abs(distance)<0.15
                     break
                 end
-                %
             end
         end
+        
+        lin_vel = 0;
+        ang_vel = 0;
+        velmsg.Linear.X = lin_vel;
+        velmsg.Angular.Z = ang_vel;
+        send(robot,velmsg);
+        
+        rosshutdown
     else
         predictedLabels = [];
     end
-%    lin_vel = 0;
-% ang_vel = 0; 
-% velmsg.Linear.X = lin_vel; 
-% velmsg.Angular.Z = ang_vel; 
-% send(robot,velmsg);
-%         
-% rosshutdown 
+    %    lin_vel = 0;
+    % ang_vel = 0;
+    % velmsg.Linear.X = lin_vel;
+    % velmsg.Angular.Z = ang_vel;
+    % send(robot,velmsg);
+    %
+    % rosshutdown
 end
 function path = FindLocalPath(mapInflated,startLocation,endLocation)
 % TO DO: Complete the function
@@ -753,7 +805,7 @@ prm.ConnectionDistance = 0.5; % Define the maximum allowed distance between two 
 
 
 path = findpath(prm, startLocation, endLocation); % Search for a feasible path with the updated PRM.
-filepath = 'map_orig.jpg'; % Provide the path of map image file
+filepath = 'new_map.jpg'; % Provide the path of map image file
 image = imread(filepath);
 figure(1),imshow(image);
 
@@ -832,29 +884,4 @@ colorRatio = double(img(:,:,1)) ./ sum(img,3);
 colorThresh = 0.6;
 bwImg = colorRatio > colorThresh;
 end
-
-% function fin_location(predicted_numb)
-% 
-%     if predicted_numb == 1
-%         end_location =[0.75, 2.25];
-%     
-%     end
-%     
-%      if predicted_numb == 2
-%         end_location =[0.75, 2.25];
-%     
-%      end
-%      if predicted_numb == 3
-%         end_location =[0.75, 2.25];
-%     
-%      end
-%      if predicted_numb == 4
-%         end_location =[0.75, 2.25];
-%     
-%     end
-%     
-% 
-% end
-
-
 
